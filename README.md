@@ -1,4 +1,4 @@
-# Grouping of Spain pronvices based on socio-economic data
+# Grouping of Spain provinces based on socio-economic data
 
 We will be working with a database of socio-economic information from the provinces of Spain. Our project involves conducting an exploratory analysis, calculating covariance and correlation matrices both numerically and graphically to identify linearly correlated variables.
 
