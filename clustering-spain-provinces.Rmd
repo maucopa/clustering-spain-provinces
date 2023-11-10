@@ -1,0 +1,334 @@
+---
+title: "Grouping of Spain provinces based on socio-economic data"
+description: |
+  Grouping of Spain provinces based on population, density, natality, mortality, GDP to identify potential marketing campaings
+author:
+  - name: Mauricio Corrales
+date: "`r Sys.Date()`"
+output:
+    distill::distill_article:
+        highlight: kate
+        colorlinks: true
+        code_folding: false
+        toc: true            
+        toc_depth: 3     
+---
+
+```{r setup, include = FALSE}
+# Ajuste comunes de los chunk
+knitr::opts_chunk$set(fig.width = 9, fig.asp = 1, out.width = "100%",
+                      message = FALSE, warning = FALSE,
+                      echo = TRUE, res = 400)
+```
+
+```{r}
+# Import of libraries
+rm(list = ls())
+library(tidyverse)
+library(tidymodels)
+library(corrplot)
+library(readxl)
+library(skimr)
+library(factoextra)
+library(FactoMineR)
+library(cluster)
+library(kableExtra)
+```
+
+
+# Loading of the data
+
+```{r}
+provincias <- read_xlsx(path = "./data/provincias.xlsx")
+glimpse(provincias)
+```
+Some of the variables include:
+
+* `Prov`: province name
+* `Poblacion`: population
+* `Mortalidad`, `Natalidad`: mortality/natality rate (per thousand)
+* `IPC`: consumer price index (based on a base value of 100).
+* `NumEmpresas`: number of companies.
+* `PIB`: gross domestic product
+* `CTH`: hotel tourism situation (overnight stays in hotel establishments)
+
+# Correlation and Covariance Matrices, Eigenvalues, and Eigenvectors.
+
+```{r}
+# We calculate the covariance and correlation matrices and represent them graphically.
+cov_mat <-
+  provincias %>% select (-Prov) %>% cov()
+  
+cor_mat <-
+  provincias %>% select (-Prov) %>% cor()
+
+corrplot(cor_mat, type = "upper",
+         tl.col = "black",  method = "ellipse")
+```
+
+We observe several variables with high correlations among them. For instance, the variables Poblacion (Population), NumEmpresas (Number of Companies), Industrias (Industries), Construccion (Construction), CTH (Hotel Tourism Situation), AFS, APT, Ocupados (Occupied), PIB (Gross Domestic Product), and TVF show a high linear correlation in an upward direction.
+
+```{r}
+# We calculate the eigenvalues and eigenvectors.
+autoval <-
+  eigen(cor_mat)
+autoval$values
+autoval$vectors
+```
+
+# PCA Analysis
+
+
+```{r}
+# We calculate all the principal components.
+pca_fit <- PCA(provincias, scale.unit = TRUE, ncp = ncol(provincias), quali.sup = 1, graph = FALSE)
+pca_fit$eig
+
+# We observe that with 6 components, we represent 95% of the information.
+pca_fit <- PCA(provincias, scale.unit = TRUE, ncp = 6, quali.sup = 1, graph = FALSE)
+
+```
+
+## Graphic representation of explained variance
+
+```{r}
+# Amount of variance covered per component
+fviz_eig(pca_fit, addlabels = TRUE, barfill = "green", 
+         barcolor = "green", xlab = "Componentes",
+         ylab = "Percentage of explained variance",
+         main = "Variance covered per component")
+```
+
+## New coordinates of the data
+
+```{r}
+pca_fit$ind$coord
+```
+
+## Contribution of the original variables in each selected principal component.
+
+```{r}
+pca_fit$var$contrib
+```
+
+## Least explained variable
+
+```{r}
+col <- c("#00AFBB", "#E7B800", "#FC4E07")
+fviz_pca_var(pca_fit, col.var = "cos2",
+             gradient.cols = col,
+             repel = TRUE) +
+  theme_minimal() + 
+  labs(title = "Coordinates of the variables",
+       color = "Weight")
+```
+The variable that is least explained in terms of the first two principal components is the variable CANE, as observed in the previous graph.
+
+## Socioeconomic indexes for some provinces of interest
+
+```{r }
+# Lineal combination to obtain the socioeconomic index
+provincias %>% select(Prov) %>% bind_cols(pca_fit$ind$coord) %>% kable (caption = "Equivalent Principal Components.")
+
+```
+
+The index to assess the economic development of a province collectively, in this case, would be the first principal component. From the previous graph, we can see that most variables indicating economic development are represented in the first component, which also accounts for 63.7% of the variance. For Madrid, this index would be 16.77, and for Melilla -2.21, which makes sense as Madrid is one of the largest provinces with better indicators of economic development.
+
+# Pre-clustering analysis
+
+```{r}
+# We calculate the distance matrix of the data and represent it with a heatmap.
+d <- dist(provincias %>%
+            select(-Prov) %>%
+            mutate(across(where(is.numeric), ~scale(.))),
+          method = "euclidean")
+
+fviz_dist(d, show_labels = TRUE)
+```
+
+Indeed, with the heatmap presented earlier, groups of provinces are identified. A small square is observed in the lower-left corner, and a large group with a not very defined boundary is also noticeable, followed by two small groups, and finally, another large group. In general, approximately 5 potential groups of provinces are identified.
+
+# Hierarchical Clustering
+
+# Simple-linkage Clustering
+
+
+```{r}
+single_clust <-
+  hclust(d, method = "single")
+
+fviz_dend(single_clust, k = 5,
+          cex = 0.5, 
+          k_colors =
+            c("#2E9FDF", "#00AFBB", "#E7B800"),
+          color_labels_by_k = TRUE, 
+          rect = TRUE) +
+  labs(title = "Simple-linkage clustering dendogram")
+```
+
+The first hierarchical cluster is performed with the simple-linkage method and with 5 clusters, as analyzed in the previous sections. We can observe that the clusters are not well-defined or evenly distributed.
+
+## Complete-linkage clustering
+
+```{r}
+complete_clust <-
+  hclust(d, method = "complete")
+
+fviz_dend(complete_clust, k = 5,
+          cex = 0.5, 
+          k_colors =
+            c("#2E9FDF", "#00AFBB", "#E7B800"),
+          color_labels_by_k = TRUE, 
+          rect = TRUE) +
+  labs(title = "Complete-linkage clustering dendogram")
+```
+
+The second hierarchical cluster is performed with the complete-linkage method and with 5 clusters, as analyzed in the previous sections. We can observe a significant improvement compared to the single linkage, as the clusters show better definition and distribution.
+
+## Ward linkage
+
+```{r}
+ward_clust <-
+  hclust(d, method = "ward.D2")
+
+fviz_dend(ward_clust, k = 5,
+          cex = 0.5, 
+          k_colors =
+            c("#2E9FDF", "#00AFBB", "#E7B800"),
+          color_labels_by_k = TRUE, 
+          rect = TRUE) +
+  labs(title = "Ward linkage dendogram")
+```
+
+The third hierarchical cluster is performed with the Ward linkage method and with 5 clusters, as analyzed in the previous sections. We notice that the clusters are better defined and distributed compared to both the single linkage and the complete linkage. We proceed to analyze with 4 clusters using the same Ward linkage to see if there are improvements.
+
+## Ward linkage with 4 clusters
+
+```{r}
+ward_clust <-
+  hclust(d, method = "ward.D2")
+
+fviz_dend(ward_clust, k = 4,
+          cex = 0.5, 
+          k_colors =
+            c("#2E9FDF", "#00AFBB", "#E7B800"),
+          color_labels_by_k = TRUE, 
+          rect = TRUE) +
+  labs(title = "Ward linkage (k=4) dendogram")
+```
+
+Finally, we can observe that with 4 clusters, there is no improvement compared to using 5 clusters. Therefore, for this dataset, I recommend using 5 clusters.
+
+# Cluster number optimization
+
+First, we scale our data
+
+```{r}
+#First, we scale our data.
+provincias_scale <- provincias %>%
+  select(-Prov) %>%
+  mutate(across(where(is.numeric),
+                rescale))
+row.names(provincias_scale) <- provincias %>% pull(Prov)
+```
+
+We use scaled data to plot the optimal number of clusters under the Silhouette criterion and Within-Cluster-Sum of Squared Errors criterion using the k-means method.
+
+## Silhouette
+
+```{r}
+fviz_nbclust(provincias_scale,
+             kmeans,
+             method = "silhouette") +
+  theme_minimal() +
+  labs(x = "Cluster number (k)",
+       y = "Mean Silhouette",
+       title = "Optimal number based on Silhouette.")
+```
+
+Under the Silhouette criterion, it indicates an optimal number of clusters equal to 3.
+
+## Within-Cluster Sum of Squared Errors (WSS)
+
+```{r}
+fviz_nbclust(provincias_scale,
+             kmeans,
+             method = "wss") +
+  theme_minimal() +
+  labs(x = "Cluster number (k)",
+       y = "Total variability within-cluster (W)",
+       title = "Optimal number based on variability")
+```
+
+And under the WSS criterion, we can observe that the optimal number is 3 clusters.
+
+## Ward linkage with 3 clusters
+
+Finally, using the Ward linkage, we perform clustering with the number of clusters identified earlier as the optimal number for both the Silhouette criterion and the WSS.
+
+```{r}
+ward_clust <-
+  hclust(d, method = "ward.D2")
+
+fviz_dend(ward_clust, k = 3,
+          cex = 0.5, 
+          k_colors =
+            c("#2E9FDF", "#00AFBB", "#E7B800"),
+          color_labels_by_k = TRUE, 
+          rect = TRUE) +
+  labs(title = "Ward linkage (k=3) dendogram")
+```
+
+# K-Means Clustering
+
+```{r}
+# We use K-Means with the number of cluster calculated before
+kclust <- kmeans(provincias_scale,
+                 centers = 3,
+                 iter.max = 50)
+
+fviz_cluster(list(data =
+                    provincias_scale,
+                  cluster =
+                    kclust$cluster),
+             palette =
+               c("#2E9FDF", "#00AFBB",
+                 "#E7B800"),
+             ellipse.type = "convex", 
+             repel = TRUE,
+             show.clust.cent = FALSE) +
+  labs(title = "K-Means Cluster") +
+  theme_minimal()
+```
+
+In the previous clustering plot formed in the plane of the first two principal components, we can observe that clusters 1 and 2 have certain points where the clusters intersect, indicating that the quality of the clustering is not the best. On the other hand, group 3 was well grouped and represented in the plot.
+
+# Silhouette Analysis for K-Means
+
+```{r}
+sil <- silhouette(kclust$cluster, d)
+row.names(sil) <- row.names(provincias_scale)
+
+
+fviz_silhouette(sil, label = TRUE) +
+  scale_fill_manual(values =
+                      c("#2E9FDF", "#00AFBB",
+                        "#E7B800")) +
+  scale_color_manual(values =
+                      c("#2E9FDF", "#00AFBB",
+                        "#E7B800")) +
+  theme_minimal() +
+  labs(title =
+         "Silhouette index for K-Means with k=3") +
+  theme(axis.text.x =
+          element_text(angle = 90,
+                       vjust = 0.5,
+                       hjust=1))
+```
+
+In the previous graph, the three clusters of provinces are clearly visible. It stands out that the provinces of Madrid and Barcelona are in one cluster, followed by two other clusters that we assume consist of provinces that are not as large in population and density as Madrid and Barcelona. This could also indicate that the socio-economic situation in the provinces of cluster 3 is higher than in the others. Finally, we note that the provinces of Castellón, Guadalajara, Albacete, and Cáceres have a negative Silhouette index, indicating that they might belong to another cluster, as observed in the previous plot.
+
+# Conclusions
+
+In conclusion, the analysis conducted in this document on the socio-economic information of the Spanish provinces reveals several correlations among variables, such as the joint increase in population, the number of companies, industry, construction, tourism, and GDP. It was determined that at least 6 principal components were needed to capture at least 95% of the variance, with the first component best representing the economic development of a province. Possible groups of provinces were identified using different clustering methods, and it was determined that 5 clusters provided a better distribution. The Silhouette criterion and intra-cluster variance were used to determine that the optimal number of clusters was 3. However, it was observed that some points overlapped between clusters, indicating lower quality in the grouping. Additionally, a discrepancy was noted in the provinces of Castellón, Guadalajara, Albacete, and Cáceres, which could belong to another cluster according to the negative Silhouette index. Finally, emphasis was placed on the cluster of Barcelona and Madrid with high indices of economic development.
+
